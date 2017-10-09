@@ -106,7 +106,7 @@ class Mapper
         Match $matchBuilder,
         TemporaryStorageFactory $temporaryStorageFactory,
         array $indexProviders,
-        $relevanceCalculationMethod = 'MAX'
+        $relevanceCalculationMethod = 'SUM'
     ) {
         $this->scoreBuilderFactory = $scoreBuilderFactory;
         $this->filterBuilder = $filterBuilder;
@@ -128,8 +128,10 @@ class Mapper
      * Build adapter dependent query
      *
      * @param RequestInterface $request
-     * @throws \LogicException
      * @return Select
+     * @throws \LogicException
+     * @throws \Zend_Db_Exception
+     * @throws \InvalidArgumentException
      */
     public function buildQuery(RequestInterface $request)
     {
@@ -165,7 +167,7 @@ class Mapper
         );
 
         $select->limit($request->getSize(), $request->getFrom());
-        $select->order('relevance ' . Select::SQL_DESC);
+        $select->order('relevance ' . Select::SQL_DESC)->order('entity_id ' . Select::SQL_DESC);
         return $select;
     }
 

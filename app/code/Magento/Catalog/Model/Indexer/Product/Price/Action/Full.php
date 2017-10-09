@@ -106,6 +106,9 @@ class Full extends \Magento\Catalog\Model\Indexer\Product\Price\AbstractAction
                 $this->_defaultIndexerResource->getMainTable()
             );
 
+            // Prepare replica table for indexation.
+            $this->_defaultIndexerResource->getConnection()->truncateTable($replicaTable);
+
             /** @var \Magento\Catalog\Model\ResourceModel\Product\Indexer\AbstractIndexer $indexer */
             foreach ($this->getTypeIndexers() as $indexer) {
                 $indexer->getTableStrategy()->setUseIdxTable(false);
@@ -150,7 +153,7 @@ class Full extends \Magento\Catalog\Model\Indexer\Product\Price\AbstractAction
             }
             $this->activeTableSwitcher->switchTable(
                 $this->_defaultIndexerResource->getConnection(),
-                $this->_defaultIndexerResource->getMainTable()
+                [$this->_defaultIndexerResource->getMainTable()]
             );
         } catch (\Exception $e) {
             throw new \Magento\Framework\Exception\LocalizedException(__($e->getMessage()), $e);

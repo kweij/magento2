@@ -11,6 +11,7 @@ use Magento\Framework\Stdlib\DateTime\DateTimeFormatterInterface;
 /**
  * Date grid column filter
  * @api
+ * @since 100.0.2
  */
 class Date extends \Magento\Backend\Block\Widget\Grid\Column\Filter\AbstractFilter
 {
@@ -131,7 +132,7 @@ class Date extends \Magento\Backend\Block\Widget\Grid\Column\Filter\AbstractFilt
     public function getEscapedValue($index = null)
     {
         $value = $this->getValue($index);
-        if ($value instanceof \DateTime) {
+        if ($value instanceof \DateTimeInterface) {
             return $this->dateTimeFormatter->formatObject(
                 $value,
                 $this->_localeDate->getDateFormat(\IntlDateFormatter::SHORT)

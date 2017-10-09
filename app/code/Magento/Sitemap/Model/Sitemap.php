@@ -3,20 +3,18 @@
  * Copyright © Magento, Inc. All rights reserved.
  * See COPYING.txt for license details.
  */
-
-// @codingStandardsIgnoreFile
-
 namespace Magento\Sitemap\Model;
 
 use Magento\Config\Model\Config\Reader\Source\Deployed\DocumentRoot;
 use Magento\Framework\App\ObjectManager;
 use Magento\Framework\DataObject;
+use Magento\Framework\Exception\LocalizedException;
+use Magento\Framework\UrlInterface;
+use Magento\Robots\Model\Config\Value;
+use Magento\Sitemap\Model\ItemProvider\ItemProviderInterface;
+use Magento\Sitemap\Model\ResourceModel\Sitemap as SitemapResource;
 
 /**
- * Sitemap model
- *
- * @method \Magento\Sitemap\Model\ResourceModel\Sitemap _getResource()
- * @method \Magento\Sitemap\Model\ResourceModel\Sitemap getResource()
  * @method string getSitemapType()
  * @method \Magento\Sitemap\Model\Sitemap setSitemapType(string $value)
  * @method string getSitemapFilename()
@@ -30,8 +28,10 @@ use Magento\Framework\DataObject;
  * @SuppressWarnings(PHPMD.TooManyFields)
  * @SuppressWarnings(PHPMD.CouplingBetweenObjects)
  * @api
+ * @since 100.0.2
+ * @codingStandardsIgnoreFile
  */
-class Sitemap extends \Magento\Framework\Model\AbstractModel
+class Sitemap extends \Magento\Framework\Model\AbstractModel implements \Magento\Framework\DataObject\IdentityInterface
 {
     const OPEN_TAG_KEY = 'start';
 
@@ -150,6 +150,35 @@ class Sitemap extends \Magento\Framework\Model\AbstractModel
     protected $dateTime;
 
     /**
+     * Model cache tag for clear cache in after save and after delete
+     *
+     * @var string
+     * @since 100.2.0
+     */
+    protected $_cacheTag = true;
+
+    /**
+     * Item resolver
+     *
+     * @var ItemProviderInterface
+     */
+    private $itemProvider;
+
+    /**
+     * Sitemap config reader
+     *
+     * @var SitemapConfigReaderInterface
+     */
+    private $configReader;
+
+    /**
+     * Sitemap Item Factory
+     *
+     * @var \Magento\Sitemap\Model\SitemapItemInterfaceFactory
+     */
+    private $sitemapItemFactory;
+
+    /**
      * Initialize dependencies.
      *
      * @param \Magento\Framework\Model\Context $context
@@ -168,6 +197,9 @@ class Sitemap extends \Magento\Framework\Model\AbstractModel
      * @param \Magento\Framework\Data\Collection\AbstractDb|null $resourceCollection
      * @param array $data
      * @param DocumentRoot|null $documentRoot
+     * @param ItemProviderInterface|null $itemProvider
+     * @param SitemapConfigReaderInterface|null $configReader
+     * @param \Magento\Sitemap\Model\SitemapItemInterfaceFactory|null $sitemapItemFactory
      * @SuppressWarnings(PHPMD.ExcessiveParameterList)
      */
     public function __construct(
@@ -186,7 +218,10 @@ class Sitemap extends \Magento\Framework\Model\AbstractModel
         \Magento\Framework\Model\ResourceModel\AbstractResource $resource = null,
         \Magento\Framework\Data\Collection\AbstractDb $resourceCollection = null,
         array $data = [],
-        \Magento\Config\Model\Config\Reader\Source\Deployed\DocumentRoot $documentRoot = null
+        \Magento\Config\Model\Config\Reader\Source\Deployed\DocumentRoot $documentRoot = null,
+        ItemProviderInterface $itemProvider = null,
+        SitemapConfigReaderInterface $configReader = null,
+        \Magento\Sitemap\Model\SitemapItemInterfaceFactory $sitemapItemFactory = null
     ) {
         $this->_escaper = $escaper;
         $this->_sitemapData = $sitemapData;
@@ -199,6 +234,11 @@ class Sitemap extends \Magento\Framework\Model\AbstractModel
         $this->_storeManager = $storeManager;
         $this->_request = $request;
         $this->dateTime = $dateTime;
+        $this->itemProvider = $itemProvider ?: ObjectManager::getInstance()->get(ItemProviderInterface::class);
+        $this->configReader = $configReader ?: ObjectManager::getInstance()->get(SitemapConfigReaderInterface::class);
+        $this->sitemapItemFactory = $sitemapItemFactory ?: ObjectManager::getInstance()->get(
+            \Magento\Sitemap\Model\SitemapItemInterfaceFactory::class
+        );
         parent::__construct($context, $registry, $resource, $resourceCollection, $data);
     }
 
@@ -209,21 +249,21 @@ class Sitemap extends \Magento\Framework\Model\AbstractModel
      */
     protected function _construct()
     {
-        $this->_init(\Magento\Sitemap\Model\ResourceModel\Sitemap::class);
+        $this->_init(SitemapResource::class);
     }
 
     /**
      * Get file handler
      *
      * @return \Magento\Framework\Filesystem\File\WriteInterface
-     * @throws \Magento\Framework\Exception\LocalizedException
+     * @throws LocalizedException
      */
     protected function _getStream()
     {
         if ($this->_stream) {
             return $this->_stream;
         } else {
-            throw new \Magento\Framework\Exception\LocalizedException(__('File handler unreachable'));
+            throw new LocalizedException(__('File handler unreachable'));
         }
     }
 
@@ -232,6 +272,8 @@ class Sitemap extends \Magento\Framework\Model\AbstractModel
      *
      * @param DataObject $sitemapItem
      * @return $this
+     * @deprecated 100.2.0
+     * @see ItemProviderInterface
      */
     public function addSitemapItem(DataObject $sitemapItem)
     {
@@ -244,6 +286,8 @@ class Sitemap extends \Magento\Framework\Model\AbstractModel
      * Collect all sitemap items
      *
      * @return void
+     * @deprecated 100.2.0
+     * @see ItemProviderInterface
      */
     public function collectSitemapItems()
     {
@@ -283,7 +327,10 @@ class Sitemap extends \Magento\Framework\Model\AbstractModel
      */
     protected function _initSitemapItems()
     {
-        $this->collectSitemapItems();
+        $sitemapItems = $this->itemProvider->getItems($this->getStoreId());
+        $mappedItems = $this->mapToSitemapItem();
+        $this->_sitemapItems = array_merge($sitemapItems, $mappedItems);
+
 
         $this->_tags = [
             self::TYPE_INDEX => [
@@ -309,7 +356,7 @@ class Sitemap extends \Magento\Framework\Model\AbstractModel
      * Check sitemap file location and permissions
      *
      * @return \Magento\Framework\Model\AbstractModel
-     * @throws \Magento\Framework\Exception\LocalizedException
+     * @throws LocalizedException
      */
     public function beforeSave()
     {
@@ -319,13 +366,13 @@ class Sitemap extends \Magento\Framework\Model\AbstractModel
          * Check path is allow
          */
         if ($path && preg_match('#\.\.[\\\/]#', $path)) {
-            throw new \Magento\Framework\Exception\LocalizedException(__('Please define a correct path.'));
+            throw new LocalizedException(__('Please define a correct path.'));
         }
         /**
          * Check exists and writable path
          */
         if (!$this->_directory->isExist($path)) {
-            throw new \Magento\Framework\Exception\LocalizedException(
+            throw new LocalizedException(
                 __(
                     'Please create the specified folder "%1" before saving the sitemap.',
                     $this->_escaper->escapeHtml($this->getSitemapPath())
@@ -334,7 +381,7 @@ class Sitemap extends \Magento\Framework\Model\AbstractModel
         }
 
         if (!$this->_directory->isWritable($path)) {
-            throw new \Magento\Framework\Exception\LocalizedException(
+            throw new LocalizedException(
                 __('Please make sure that "%1" is writable by the web-server.', $this->getSitemapPath())
             );
         }
@@ -342,7 +389,7 @@ class Sitemap extends \Magento\Framework\Model\AbstractModel
          * Check allow filename
          */
         if (!preg_match('#^[a-zA-Z0-9_\.]+$#', $this->getSitemapFilename())) {
-            throw new \Magento\Framework\Exception\LocalizedException(
+            throw new LocalizedException(
                 __(
                     'Please use only letters (a-z or A-Z), numbers (0-9) or underscores (_) in the filename. No spaces or other characters are allowed.'
                 )
@@ -368,30 +415,30 @@ class Sitemap extends \Magento\Framework\Model\AbstractModel
     {
         $this->_initSitemapItems();
 
-        /** @var $sitemapItem \Magento\Framework\DataObject */
-        foreach ($this->_sitemapItems as $sitemapItem) {
-            $changefreq = $sitemapItem->getChangefreq();
-            $priority = $sitemapItem->getPriority();
-            foreach ($sitemapItem->getCollection() as $item) {
-                $xml = $this->_getSitemapRow(
-                    $item->getUrl(),
-                    $item->getUpdatedAt(),
-                    $changefreq,
-                    $priority,
-                    $item->getImages()
-                );
-                if ($this->_isSplitRequired($xml) && $this->_sitemapIncrement > 0) {
-                    $this->_finalizeSitemap();
-                }
-                if (!$this->_fileSize) {
-                    $this->_createSitemap();
-                }
-                $this->_writeSitemapRow($xml);
-                // Increase counters
-                $this->_lineCount++;
-                $this->_fileSize += strlen($xml);
+        /** @var $item SitemapItemInterface */
+        foreach ($this->_sitemapItems as $item) {
+            $xml = $this->_getSitemapRow(
+                $item->getUrl(),
+                $item->getUpdatedAt(),
+                $item->getChangeFrequency(),
+                $item->getPriority(),
+                $item->getImages()
+            );
+
+            if ($this->_isSplitRequired($xml) && $this->_sitemapIncrement > 0) {
+                $this->_finalizeSitemap();
             }
+
+            if (!$this->_fileSize) {
+                $this->_createSitemap();
+            }
+
+            $this->_writeSitemapRow($xml);
+            // Increase counters
+            $this->_lineCount++;
+            $this->_fileSize += strlen($xml);
         }
+
         $this->_finalizeSitemap();
 
         if ($this->_sitemapIncrement == 1) {
@@ -408,11 +455,6 @@ class Sitemap extends \Magento\Framework\Model\AbstractModel
         } else {
             // Otherwise create index file with list of generated sitemaps
             $this->_createSitemapIndex();
-        }
-
-        // Push sitemap to robots.txt
-        if ($this->_isEnabledSubmissionRobots()) {
-            $this->_addSitemapToRobotsTxt($this->getSitemapFilename());
         }
 
         $this->setSitemapTime($this->_dateModel->gmtDate('Y-m-d H:i:s'));
@@ -454,14 +496,12 @@ class Sitemap extends \Magento\Framework\Model\AbstractModel
      */
     protected function _isSplitRequired($row)
     {
-        /** @var $helper \Magento\Sitemap\Helper\Data */
-        $helper = $this->_sitemapData;
         $storeId = $this->getStoreId();
-        if ($this->_lineCount + 1 > $helper->getMaximumLinesNumber($storeId)) {
+        if ($this->_lineCount + 1 > $this->configReader->getMaximumLinesNumber($storeId)) {
             return true;
         }
 
-        if ($this->_fileSize + strlen($row) > $helper->getMaximumFileSize($storeId)) {
+        if ($this->_fileSize + strlen($row) > $this->configReader->getMaximumFileSize($storeId)) {
             return true;
         }
 
@@ -541,7 +581,7 @@ class Sitemap extends \Magento\Framework\Model\AbstractModel
      * @param null|string $fileName
      * @param string $type
      * @return void
-     * @throws \Magento\Framework\Exception\LocalizedException
+     * @throws LocalizedException
      */
     protected function _createSitemap($fileName = null, $type = self::TYPE_URL)
     {
@@ -614,7 +654,7 @@ class Sitemap extends \Magento\Framework\Model\AbstractModel
      * @param string $type
      * @return string
      */
-    protected function _getStoreBaseUrl($type = \Magento\Framework\UrlInterface::URL_TYPE_LINK)
+    protected function _getStoreBaseUrl($type = UrlInterface::URL_TYPE_LINK)
     {
         /** @var \Magento\Store\Model\Store $store */
         $store = $this->_storeManager->getStore($this->getStoreId());
@@ -629,7 +669,7 @@ class Sitemap extends \Magento\Framework\Model\AbstractModel
      * @param string $type
      * @return string
      */
-    protected function _getUrl($url, $type = \Magento\Framework\UrlInterface::URL_TYPE_LINK)
+    protected function _getUrl($url, $type = UrlInterface::URL_TYPE_LINK)
     {
         return $this->_getStoreBaseUrl($type) . ltrim($url, '/');
     }
@@ -644,7 +684,7 @@ class Sitemap extends \Magento\Framework\Model\AbstractModel
      */
     protected function _getMediaUrl($url)
     {
-        return $this->_getUrl($url, \Magento\Framework\UrlInterface::URL_TYPE_MEDIA);
+        return $this->_getUrl($url, UrlInterface::URL_TYPE_MEDIA);
     }
 
     /**
@@ -687,7 +727,7 @@ class Sitemap extends \Magento\Framework\Model\AbstractModel
             $storeDomain = rtrim($url . '/' . $installationFolder, '/');
         } else {
             //case when documentRoot contains symlink to basedir
-            $url = $this->_getStoreBaseUrl(\Magento\Framework\UrlInterface::URL_TYPE_WEB);
+            $url = $this->_getStoreBaseUrl(UrlInterface::URL_TYPE_WEB);
             $storeDomain = rtrim($url, '/');
         }
 
@@ -710,13 +750,13 @@ class Sitemap extends \Magento\Framework\Model\AbstractModel
      * Check is enabled submission to robots.txt
      *
      * @return bool
+     * @deprecated Because the robots.txt file is not generated anymore,
+     *             this method is not needed and will be removed in major release.
      */
     protected function _isEnabledSubmissionRobots()
     {
-        /** @var $helper \Magento\Sitemap\Helper\Data */
-        $helper = $this->_sitemapData;
         $storeId = $this->getStoreId();
-        return (bool)$helper->getEnableSubmissionRobots($storeId);
+        return (bool)$this->configReader->getEnableSubmissionRobots($storeId);
     }
 
     /**
@@ -724,6 +764,8 @@ class Sitemap extends \Magento\Framework\Model\AbstractModel
      *
      * @param string $sitemapFileName
      * @return void
+     * @deprecated Because the robots.txt file is not generated anymore,
+     *             this method is not needed and will be removed in major release.
      */
     protected function _addSitemapToRobotsTxt($sitemapFileName)
     {
@@ -760,5 +802,42 @@ class Sitemap extends \Magento\Framework\Model\AbstractModel
         }
 
         return PHP_EOL;
+    }
+
+    /**
+     * Sitemap item mapper for backwards compatibility
+     *
+     * @return array
+     */
+    private function mapToSitemapItem()
+    {
+        $items = [];
+
+        foreach ($this->_sitemapItems as $data) {
+            foreach ($data->getCollection() as $item) {
+                $items[] = $this->sitemapItemFactory->create([
+                    'url' => $item->getUrl(),
+                    'updatedAt' => $item->getUpdatedAt(),
+                    'images' => $item->getImages(),
+                    'priority' => $data->getPriority(),
+                    'changeFrequency' => $data->getChangeFrequency(),
+                ]);
+            }
+        }
+
+        return $items;
+    }
+
+    /**
+     * Get unique page cache identities
+     *
+     * @return array
+     * @since 100.2.0
+     */
+    public function getIdentities()
+    {
+        return [
+            Value::CACHE_TAG . '_' . $this->getStoreId(),
+        ];
     }
 }

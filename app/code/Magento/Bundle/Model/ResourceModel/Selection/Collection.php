@@ -17,6 +17,7 @@ use Magento\Framework\App\ObjectManager;
  *
  * @api
  * @SuppressWarnings(PHPMD.CouplingBetweenObjects)
+ * @since 100.0.2
  */
 class Collection extends \Magento\Catalog\Model\ResourceModel\Product\Collection
 {
@@ -108,10 +109,12 @@ class Collection extends \Magento\Catalog\Model\ResourceModel\Product\Collection
         );
         $this->getSelect()->joinLeft(
             ['price' => $this->getTable('catalog_product_bundle_selection_price')],
-            'selection.selection_id = price.selection_id AND price.website_id = ' . (int)$websiteId,
+            'selection.selection_id = price.selection_id AND price.website_id = ' . (int)$websiteId .
+            ' AND selection.parent_product_id = price.parent_product_id',
             [
                 'selection_price_type' => $priceType,
                 'selection_price_value' => $priceValue,
+                'parent_product_id' => 'price.parent_product_id',
                 'price_scope' => 'price.website_id'
             ]
         );
@@ -163,6 +166,7 @@ class Collection extends \Magento\Catalog\Model\ResourceModel\Product\Collection
      * Add filtering of product then havent enoght stock
      *
      * @return $this
+     * @since 100.2.0
      */
     public function addQuantityFilter()
     {
@@ -180,6 +184,7 @@ class Collection extends \Magento\Catalog\Model\ResourceModel\Product\Collection
 
     /**
      * @inheritDoc
+     * @since 100.2.0
      */
     public function getNewEmptyItem()
     {
@@ -197,6 +202,7 @@ class Collection extends \Magento\Catalog\Model\ResourceModel\Product\Collection
      * @param bool $useRegularPrice
      *
      * @return $this
+     * @since 100.2.0
      */
     public function addPriceFilter($product, $searchMin, $useRegularPrice = false)
     {
@@ -248,7 +254,7 @@ class Collection extends \Magento\Catalog\Model\ResourceModel\Product\Collection
 
     /**
      * @return \Magento\CatalogRule\Model\ResourceModel\Product\CollectionProcessor
-     * @deprecated
+     * @deprecated 100.2.0
      */
     private function getCatalogRuleProcessor()
     {
